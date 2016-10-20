@@ -24,7 +24,7 @@ public:
   FaceLib();
   ~FaceLib();
   
-  void initModel(const vector<string> prototxts, const vector<string> binarys, const int octave_level = 2);
+  void initModel(const vector<string> prototxts, const vector<string> binarys, const vector<float> threds, const int octave_level = 2);
   vector<pair<vector<int>, float> >  detect(const Mat image);
   vector<pair<vector<int>, float> > global_NMS(const vector<pair<vector<int>, float> > rects, float iou_thred = 0.8);
   

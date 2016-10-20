@@ -33,7 +33,7 @@ static bool PairCompare_rects(const std::pair<vector<int>, float>& lhs,
   return lhs.second > rhs.second;
 }
 
-void FaceLib::initModel(const vector<string> prototxts, const vector<string> binarys, const int octave_level){
+void FaceLib::initModel(const vector<string> prototxts, const vector<string> binarys, const vector<float> threds, const int octave_level){
     /* Set mode GPU/CPU */
   if (deviceID >= 0) {
     cerr << "Using GPU..." << endl;
@@ -83,10 +83,9 @@ void FaceLib::initModel(const vector<string> prototxts, const vector<string> bin
 
     nets_.push_back(net);
   }
-  thred_.push_back(0.3);
-  thred_.push_back(0.3);
-  thred_.push_back(0.3);
-
+  for(int i = 0; i < threds.size(); ++i) {
+    thred_.push_back(threds[i]);
+  }
   Blob<float>* inputLayer = nets_[0]->input_blobs()[0];
   inputLayer->Reshape(1, nInputChannels_, inputSizes_[0].height * 2, inputSizes_[0].width * 2);
   nets_[0]->Reshape();
@@ -160,8 +159,11 @@ vector<pair<vector<int>, float> > FaceLib::detect(const Mat image) {
     free(nms_data);
   } // End of pyramid loop
 
-  //cascade_result = detect_result; //predict(image, detect_result);
-  cascade_result = predict(image, detect_result);
+  if(nets_.size() == 1) {
+    return detect_result;
+  } else {
+    cascade_result = predict(image, detect_result);
+  }
   //LOG(INFO) << count;
   return cascade_result;
 }
@@ -415,31 +417,54 @@ float calculate_overlap(const vector<int> &rect1, const vector<int> &rect2) {
   return i_s / sum_s;
 }
 
-int main() {
+int main(int argc, char **argv) {
     // Load model
-    const string prototxt1 = "./model1.prototxt";
-    const string prototxt2 = "./model2.prototxt";
-    const string prototxt3 = "./model3.prototxt";
-    const string binary = "./model.caffemodel";
+
+    if(argc != 2) {
+        printf("Usage: FaceLib.bin <params.cfg>\n");
+        return 0;
+    }
 
     vector<string> prototxts, binarys;
-    prototxts.push_back(prototxt1);
-    prototxts.push_back(prototxt2);
-    prototxts.push_back(prototxt3);
+    vector<float> threds;
+    float global_NMS = 0;
 
-    binarys.push_back(binary);
-    binarys.push_back(binary);
-    binarys.push_back(binary);
+    std::ifstream params_f(argv[1]);
+    string line;
+    while(std::getline(params_f, line)) {
+        size_t pos; 
+        pos = line.find('#');
+        if(0 == pos) continue;
+        string param_line = line.substr(0, pos);
+        pos = param_line.find(':');
 
+        string param_name = param_line.substr(0, pos);
+        param_name.erase(0,param_name.find_first_not_of(" \t\n\r"));
+        param_name.erase(param_name.find_last_not_of(" \t\n\r") + 1);
+
+        string param_value = param_line.substr(pos+1);
+        param_value.erase(0,param_value.find_first_not_of(" \t\n\r"));
+        param_value.erase(param_value.find_last_not_of(" \t\n\r") + 1);
+       
+        if(param_name.compare("model") == 0) {
+            prototxts.push_back(param_value);
+        } else if(param_name.compare("weight") == 0) {
+            binarys.push_back(param_value);
+        } else if(param_name.compare("thred") == 0) {
+            threds.push_back(atof(param_value.c_str()));
+        } else if(param_name.compare("global_NMS") == 0) {
+            global_NMS = atof(param_value.c_str());
+        }
+    }
+ 
     FaceLib p;
     //p.deviceID = 0; // -1 for CPU, others for GPU
-    p.initModel(prototxts, binarys, 2);
+    p.initModel(prototxts, binarys, threds, 2);
 
     // Load test image
     Mat images;
     std::ifstream infile("test.txt");
-    string line, label_str;
-    string im_name, im_path;
+    string im_name, im_path, label_str;
 
     size_t pos;
     int acc_num5 = 0, gt_a_num5 = 0, gt_num = 0, det_num = 0;
@@ -469,8 +494,11 @@ int main() {
       // Detect
       vector<pair<vector<int>, float> > locations_det, locations;
       locations_det = p.detect(im);
-      locations = p.global_NMS(locations_det, 0.6);
-      //locations = locations_det; //p.global_NMS(locations_det, 0.8);
+      if(global_NMS != 0) {
+          locations = p.global_NMS(locations_det, global_NMS);
+      } else {
+          locations = locations_det; //p.global_NMS(locations_det, 0.8);
+      }
       det_num += locations.size();
       bool Fir_flag5 = true;
       bool Fir_flag8 = true;
@@ -485,7 +513,7 @@ int main() {
           }
           //rectangle(im, new_rect, Scalar(0,0,255), 3);
         }
-        if(iou > 0.7) {
+        if(iou > 0.8) {
           acc_num8 += 1;
           if(Fir_flag8) {
             gt_a_num8 +=1;
@@ -504,7 +532,7 @@ int main() {
   LOG(INFO) << "0.5 Recall: " << float(gt_a_num5) / gt_num << "\t" << gt_a_num5 << "/" << gt_num;
   LOG(INFO) << "0.5 Prection: " << float(acc_num5) / det_num << "\t" << acc_num5 << "/" << det_num;
 
-  LOG(INFO) << "0.7 Recall: " << float(gt_a_num8) / gt_num << "\t" << gt_a_num8 << "/" << gt_num;
-  LOG(INFO) << "0.7 Prection: " << float(acc_num8) / det_num << "\t" << acc_num8 << "/" << det_num;
+  LOG(INFO) << "0.8 Recall: " << float(gt_a_num8) / gt_num << "\t" << gt_a_num8 << "/" << gt_num;
+  LOG(INFO) << "0.8 Prection: " << float(acc_num8) / det_num << "\t" << acc_num8 << "/" << det_num;
     return 0;
 }
