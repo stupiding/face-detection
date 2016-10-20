@@ -1,0 +1,195 @@
+name: "12_rect_detectoin"
+
+layer {
+  name: "data"
+  type: "DetectionData"
+  top: "data"
+  top: "info"
+  include {
+    phase: TRAIN
+  }
+  detection_data_param{
+    root_folder: '/home/guojinma/Datasets/face/AFLW/data/data/flickr/'
+    source: '/home/guojinma/Datasets/face/AFLW/my_data/train_list.txt'
+    batch_size: 256
+    shuffle: true
+    new_height: 12
+    new_width: 12
+    pos_num: 2
+    neg_num: 6
+    fg_thred: 0.8
+    bg_thred: 0.5
+    in_memory: true
+  }
+}
+layer {
+  name: "data"
+  type: "DetectionData"
+  top: "data"
+  top: "info"
+  include {
+    phase: TEST
+  }
+  detection_data_param{
+    root_folder: '/home/guojinma/Datasets/face/AFLW/data/data/flickr/'
+    source: '/home/guojinma/Datasets/face/AFLW/my_data/valid_list.txt'
+    batch_size: 128
+    new_height: 12
+    new_width: 12
+    pos_num: 2
+    neg_num: 6
+    fg_thred: 0.8
+    bg_thred: 0.5
+    in_memory: false
+    shuffle: true
+  }
+}
+
+layer {
+  name: "slice_info"
+  type: "Slice"
+  bottom: "info"
+  top: "is_face"
+  top: "relative_coord"
+  slice_param {
+    slice_point: 1
+  }
+}
+
+layer {
+  name: "conv1"
+  type: "Convolution"
+  bottom: "data"
+  top: "conv1"
+  convolution_param {
+    num_output: 16
+    pad: 0
+    kernel_size: 3
+    dilation: 1
+    stride: 2
+    weight_filler {
+      type: "gaussian"
+      std: 0.0001
+    }
+    bias_filler {
+      type: "constant"
+    }
+  }
+}
+layer {
+  name: "relu1"
+  type: "ReLU"
+  bottom: "conv1"
+  top: "conv1"
+}
+layer {
+  name: "fc1"
+  type: "Convolution"
+  bottom: "conv1"
+  top: "fc1"
+  param {
+    lr_mult: 1
+    decay_mult: 1
+  }
+  param {
+    lr_mult: 2
+    decay_mult: 0
+  }
+  convolution_param {
+    num_output: 16
+    kernel_size: 3
+    pad: 0
+    stride: 1
+    weight_filler {
+      type: "xavier"
+      std: 0.01
+    }
+    bias_filler {
+      type: "constant"
+    }
+  }
+}
+layer {
+  name: "relu4"
+  type: "ReLU"
+  bottom: "fc1"
+  top: "fc1"
+}
+layer {
+  name: "fc2"
+  type: "Convolution"
+  bottom: "fc1"
+  top: "fc2"
+  param {
+    lr_mult: 1
+    decay_mult: 1
+  }
+  param {
+    lr_mult: 2
+    decay_mult: 0
+  }
+  convolution_param {
+    num_output: 1
+    kernel_size: 3
+    stride: 1
+    weight_filler {
+      type: "xavier"
+      std: 0.01
+    }
+    bias_filler {
+      type: "constant"
+    }
+  }
+}
+layer {
+  name: "pred_coord"
+  type: "Convolution"
+  bottom: "fc1"
+  top: "pred_coord"
+  param {
+    lr_mult: 1
+    decay_mult: 10
+  }
+  param {
+    lr_mult: 2
+    decay_mult: 0
+  }
+  convolution_param {
+    num_output: 4
+    kernel_size: 3
+    stride: 1
+    pad: 0
+    weight_filler {
+      type: "xavier"
+      std: 0.01
+    }
+    bias_filler {
+      type: "constant"
+    }
+  }
+}
+
+layer {
+  name: "accuracy"
+  type: "Accuracy"
+  bottom: "fc2"
+  bottom: "is_face"
+  top: "accuracy"
+}
+layer {
+  name: "loss_cls"
+  type: "SigmoidCrossEntropyLoss"
+  bottom: "fc2"
+  bottom: "is_face"
+  top: "loss_cls"
+}
+layer {
+  name: "silence1"
+  type: "Silence"
+  bottom: "relative_coord"
+}
+layer {
+  name: "silence2"
+  type: "Silence"
+  bottom: "pred_coord"
+}

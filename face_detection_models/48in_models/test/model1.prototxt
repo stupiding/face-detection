@@ -1,0 +1,82 @@
+name: "12_rect_detectoin"
+
+###########################################################################
+###################            Scale 1             ########################
+###########################################################################
+
+layer {
+  name: "data"
+  type: "Input"
+  top: "data"
+  input_param { 
+    shape: { 
+      dim: 1 
+      dim: 3 
+      dim: 12 
+      dim: 12 
+    } 
+  }
+}
+layer {
+  name: "conv1_1"
+  type: "Convolution"
+  bottom: "data"
+  top: "conv1_1"
+  convolution_param {
+    num_output: 16
+    pad: 0
+    kernel_size: 3
+    dilation: 1
+    stride: 2
+  }
+}
+layer {
+  name: "relu1_1"
+  type: "ReLU"
+  bottom: "conv1_1"
+  top: "conv1_1"
+}
+layer {
+  name: "conv2_1"
+  type: "Convolution"
+  bottom: "conv1_1"
+  top: "conv2_1"
+  convolution_param {
+    num_output: 16
+    kernel_size: 3
+    pad: 0
+    stride: 1
+  }
+}
+layer {
+  name: "relu2_1"
+  type: "ReLU"
+  bottom: "conv2_1"
+  top: "conv2_1"
+}
+layer {
+  name: "conv3_1"
+  type: "Convolution"
+  bottom: "conv2_1"
+  top: "conv3_1"
+  convolution_param {
+    num_output: 1
+    kernel_size: 3
+    stride: 1
+  }
+}
+layer {
+  name: "pred"
+  type: "Sigmoid"
+  bottom: "conv3_1"
+  top: "pred"
+}
+#layer {
+#  name: "NMS_pred"
+#  type: "NMS"
+#  bottom: "pred"
+#  top: "NMS_pred"
+#  nms_param {
+#    kernel_size: 7
+#  }
+#}
