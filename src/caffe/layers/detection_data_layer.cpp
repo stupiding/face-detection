@@ -283,10 +283,10 @@ void DetectionDataLayer<Dtype>::load_batch(Batch<Dtype>* batch) {
       trans_time += timer.MicroSeconds();
 
       prefetch_label[batch_idx * 5] = 1;
-      prefetch_label[batch_idx * 5 + 1] = float(t_rect[0] - gt_rects[cur_gt_idx][0]) / t_rect[2];
-      prefetch_label[batch_idx * 5 + 2] = float(t_rect[1] - gt_rects[cur_gt_idx][1]) / t_rect[3];
-      prefetch_label[batch_idx * 5 + 3] = float(t_rect[2] - gt_rects[cur_gt_idx][2]) / t_rect[2];
-      prefetch_label[batch_idx * 5 + 4] = float(t_rect[3] - gt_rects[cur_gt_idx][3]) / t_rect[3];
+      prefetch_label[batch_idx * 5 + 1] = float(gt_rects[cur_gt_idx][0] - t_rect[0]) / t_rect[2];
+      prefetch_label[batch_idx * 5 + 2] = float(gt_rects[cur_gt_idx][1] - t_rect[1]) / t_rect[3];
+      prefetch_label[batch_idx * 5 + 3] = float(gt_rects[cur_gt_idx][2] - t_rect[2]) / t_rect[2];
+      prefetch_label[batch_idx * 5 + 4] = float(gt_rects[cur_gt_idx][3] - t_rect[3]) / t_rect[3];
     }
 
     for(int rect_id = 0; rect_id < neg_num; ++rect_id) {
