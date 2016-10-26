@@ -7,6 +7,8 @@
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 
+#include "google/protobuf/text_format.h"
+
 #include "caffe/blob.hpp"
 #include "caffe/caffe.hpp"
 #include "caffe/util/io.hpp"
@@ -21,12 +23,8 @@ using namespace caffe;
 // set default mode CPU
 //set max face size [0: the min side length of input image]
 //set min face size [0: the input size of final network]
-FaceLib::FaceLib():deviceID(-1),max_size_(0),min_size_(48) {} 
+FaceLib::FaceLib():deviceID(-1),max_size_(0),min_size_(12) {} 
 FaceLib::~FaceLib() {}
-
-void get_params(string cfg_name, string param_name, string &param_value) {
-  //ifstream in(cfg_name, ios::in);
-}
 
 static bool PairCompare_rects(const std::pair<vector<int>, float>& lhs,
                         const std::pair<vector<int>, float>& rhs) {
@@ -36,11 +34,13 @@ static bool PairCompare_rects(const std::pair<vector<int>, float>& lhs,
 void FaceLib::initModel(const vector<string> prototxts, const vector<string> binarys, const vector<float> threds, const int octave_level){
     /* Set mode GPU/CPU */
   if (deviceID >= 0) {
-    cerr << "Using GPU..." << endl;
+    LOG(ERROR) << "Using GPU...";
     Caffe::set_mode(Caffe::GPU);
     Caffe::SetDevice(deviceID);
-  } else
+  } else {
+    LOG(ERROR) << "Using CPU...";
     Caffe::set_mode(Caffe::CPU);
+  }
 
   CHECK(prototxts.size() == binarys.size()) 
     << "The number of prototxts and binarys should be equal.";
@@ -58,16 +58,12 @@ void FaceLib::initModel(const vector<string> prototxts, const vector<string> bin
     nInputChannels_ = inputLayer->channels();
 
     CHECK(nInputChannels_ == 3)
-      << "Input layer should have 1 or 3 channels.";
-    if(i == prototxts.size() - 1)
-      CHECK(output_num <= 3) << "In detection, only the number of output in the final net can be greater than 1.";
-    else 
-      CHECK(output_num == 1) << "In detection, only the number of output in the final net can be greater than 1.";
+      << "Input layer should have 3 channels.";
 
     if(output_num > 1) {
       Blob<float>* outputLayer1 = net->output_blobs()[0];
       Blob<float>* outputLayer2 = net->output_blobs()[1];
-      CHECK(output_num <= 2) << "Not yet.";
+      CHECK(output_num <= 2) << "Key point Not yet.";
       int out_channels1 = outputLayer1->channels();
       int out_channels2 = outputLayer2->channels();
       CHECK((out_channels1 <=2 && out_channels2 == 4) || (out_channels1 == 4 && out_channels2 <= 2)) 
@@ -109,9 +105,10 @@ vector<pair<vector<int>, float> > FaceLib::detect(const Mat image) {
     return cascade_result;
   }
 
-  int pyramid_level = octave_level_ * (nets_.size() - 1);
+  int times_with_net0 = int(log(inputSizes_[inputSizes_.size() - 1].height / inputSizes_[0].height) / log(2) + 0.1);
+  int pyramid_level = octave_level_ * times_with_net0;
   //int min_size = image.cols > image.rows ? image.rows : image.cols;
-  //for(int l = 1; 1080 / 4 * pow(1.41421356, l) < min_size; l++, pyramid_level++) ;
+  //for(int l = 1; 720 / 4 * pow(1.41421356, l) < min_size; l++, pyramid_level++) ;
 
   for(; pyramid_level < image_pyramid_.size(); ++pyramid_level) {
 
@@ -145,7 +142,7 @@ vector<pair<vector<int>, float> > FaceLib::detect(const Mat image) {
       for(int c = 0; c < width; ++c) {
         float rc_score = nms_data[r * width + c];
         if(rc_score > this->thred_[0]) {
-        //if(output_data[r * width + c] > this->thred_) {
+        //if(output_data[r * width + c] > this->thred_[0]) {
           vector<int> rect(5);
           rect[0] = int(this->net_stride_ * c / resize_factor);
           rect[1] = int(this->net_stride_ * r / resize_factor);
@@ -164,29 +161,33 @@ vector<pair<vector<int>, float> > FaceLib::detect(const Mat image) {
   } else {
     cascade_result = predict(image, detect_result);
   }
-  //LOG(INFO) << count;
   return cascade_result;
 }
 
 vector<pair<vector<int>, float> > FaceLib::predict(Mat image, vector<pair<vector<int>, float> > rects) {
 
-  vector<pair<vector<int>, float> > result_rects; 
-  vector<int> is_face;
+  vector<pair<vector<int>, float> > internal_rects(rects);
+  vector<pair<vector<int>, float> > result_rects;
+  vector<int> is_face(rects.size(), 1);
+  vector<int> rect_count(nets_.size(), 0);
+  rect_count[0] = rects.size();
 
-  for(int i = 0; i < rects.size(); ++i) {
-    int pyramid_level = rects[i].first[4];
-    for (int j = 1; j < nets_.size(); ++j) {
+  for (int j = 1; j < nets_.size(); ++j) {
+    for(int i = 0; i < rects.size(); ++i) {
+    if(is_face[i] == 0) continue;
+      int pyramid_level = rects[i].first[4];
       vector<int> cur_rect(4);
-      int cur_level = pyramid_level - j * octave_level_;
+      int times_with_net0 = int(log(inputSizes_[j].height / inputSizes_[0].height) / log(2) + 0.1);
+      int cur_level = pyramid_level - times_with_net0 * octave_level_;
       float resize_factor = float(image_pyramid_[cur_level].rows) / image.rows;
-      for(int k =0; k < 4; ++k) {
-        cur_rect[k] = int(rects[i].first[k] * resize_factor);
+      for(int k =0; k < 2; ++k) {
+        cur_rect[k] = int(internal_rects[i].first[k] * resize_factor);
       }
       cur_rect[2] = inputSizes_[j].height;
       cur_rect[3] = inputSizes_[j].width;
+
       vector<Mat> inputChannels;
       warpInputLayer(&inputChannels, j);
-
       preprocess(image_pyramid_[cur_level], &inputChannels, cur_rect);
       nets_[j]->Forward();
 
@@ -205,30 +206,41 @@ vector<pair<vector<int>, float> > FaceLib::predict(Mat image, vector<pair<vector
       if(outputLayer->channels() == 2) {
         face_score = output_data[1];
       }
+
       if(face_score < this->thred_[j]) {
-        is_face.push_back(0);
-        break;
-      }
-      else if (j == nets_.size() - 1) {
-        is_face.push_back(1);
-        if(rect_reg_layer == NULL) {
-          result_rects.push_back(make_pair<vector<int>, float>(rects[i].first, face_score));
-        } else {
-          const float *rect_reg = rect_reg_layer->cpu_data();
-          vector<int> new_rect(5);
-          for(int k = 0; k < 4; k+=2) {
-            new_rect[k] = rects[i].first[k] + rect_reg[k] * rects[i].first[2];
-          }
-          for(int k = 1; k < 4; k+=2) {
-            new_rect[k] = rects[i].first[k] + rect_reg[k] * rects[i].first[3];
-          }
-          new_rect[4] = rects[i].first[4];
-          result_rects.push_back(make_pair<vector<int>, float>(new_rect, face_score));
-          
+        is_face[i] = 0;
+      } else {
+        rect_count[j] ++;
+        if(rect_reg_layer == NULL) continue;
+        // For models in prior to the final one, only the left top point is regressed
+        const float *rect_reg = rect_reg_layer->cpu_data();
+
+        internal_rects[i].first[0] += int(internal_rects[i].first[2] * rect_reg[0]);
+        if(internal_rects[i].first[0] + internal_rects[i].first[2] >= image.cols) 
+          internal_rects[i].first[0] = image.cols - internal_rects[i].first[2] - 1;
+        if(internal_rects[i].first[0] < 0) internal_rects[i].first[0] = 0;
+
+        internal_rects[i].first[1] += int(internal_rects[i].first[3] * rect_reg[1]);
+        if(internal_rects[i].first[1] + internal_rects[i].first[3] >= image.rows) 
+          internal_rects[i].first[1] = image.rows - internal_rects[i].first[3] - 1;
+        if(internal_rects[i].first[1] < 0) internal_rects[i].first[1] = 0;
+
+        if (j < nets_.size() - 1) {
+          // For the final model, the whole rect is regressed
+          internal_rects[i].first[2] = internal_rects[i].first[2] + rect_reg[2] * internal_rects[i].first[2];
+          internal_rects[i].first[3] = internal_rects[i].first[3] + rect_reg[2] * internal_rects[i].first[3];
+          internal_rects[i].first[4] = internal_rects[i].first[4];
         }
       }
     } // End of nets_ loop
   } // End of rects loop 
+
+  for(int i = 0; i < rects.size(); ++i) {
+    if(is_face[i] == 1) {
+      result_rects.push_back(internal_rects[i]);
+    }
+  }
+
   return result_rects;
 }
 
@@ -249,6 +261,7 @@ vector<pair<vector<int>, float> > FaceLib::global_NMS(const vector<pair<vector<i
         i_s = (i_by - i_ty) * (i_rx - i_lx);
       }
       if(i_s / (rect1[2] * rect1[3]) > iou_thred || i_s / (rect2[2] * rect2[3]) > iou_thred) {
+      //if(i_s / (rect1[2] * rect1[3] + rect2[2] * rect2[3] - i_s) > iou_thred) {
         result_rects.erase(result_rects.begin() + j);
       }
     }
@@ -409,7 +422,7 @@ float calculate_overlap(const vector<int> &rect1, const vector<int> &rect2) {
   i_by = (rect1[1] + rect1[3]) < (rect2[1] + rect2[3]) ? (rect1[1] + rect1[3]) : (rect2[1] + rect2[3]);
   
   float i_s = 0, sum_s = 0;
-  if(i_lx < i_rx || i_ty < i_by) {
+  if(i_lx < i_rx && i_ty < i_by) {
     i_s = (i_by - i_ty) * (i_rx - i_lx);
   }
   sum_s = (rect1[2] * rect1[3]) + (rect2[2] * rect2[3]) - i_s;
@@ -420,6 +433,7 @@ float calculate_overlap(const vector<int> &rect1, const vector<int> &rect2) {
 int main(int argc, char **argv) {
     // Load model
 
+    ::google::InitGoogleLogging(argv[0]);
     if(argc != 2) {
         printf("Usage: FaceLib.bin <params.cfg>\n");
         return 0;
@@ -428,6 +442,9 @@ int main(int argc, char **argv) {
     vector<string> prototxts, binarys;
     vector<float> threds;
     float global_NMS = 0;
+    int octave_level = 2;
+    int min_size = 12;
+    int max_size = 0;
 
     std::ifstream params_f(argv[1]);
     string line;
@@ -454,17 +471,27 @@ int main(int argc, char **argv) {
             threds.push_back(atof(param_value.c_str()));
         } else if(param_name.compare("global_NMS") == 0) {
             global_NMS = atof(param_value.c_str());
+        } else if(param_name.compare("octave_level") == 0) {
+            octave_level = atoi(param_value.c_str());
+        } else if(param_name.compare("min_size") == 0) {
+            min_size = atoi(param_value.c_str());
+        } else if(param_name.compare("max_size") == 0) {
+            max_size = atoi(param_value.c_str());
         }
     }
  
     FaceLib p;
-    //p.deviceID = 0; // -1 for CPU, others for GPU
-    p.initModel(prototxts, binarys, threds, 2);
+    // p.deviceID = 0; // -1 for CPU, others for GPU
+    p.min_size_ = min_size;
+    p.max_size_ = max_size;
+    p.initModel(prototxts, binarys, threds, octave_level);
 
     // Load test image
     Mat images;
     std::ifstream infile("test.txt");
     string im_name, im_path, label_str;
+
+FILE* fp =(FILE*)fopen("result_rects.txt", "w");
 
     size_t pos;
     int acc_num5 = 0, gt_a_num5 = 0, gt_num = 0, det_num = 0;
@@ -483,9 +510,10 @@ int main(int argc, char **argv) {
       gt_rect.push_back(h);
       gt_num += 1;
       if(gt_num % 100 == 0) {
-        LOG(INFO) << "Detected " << gt_num << " images.";
+        LOG(ERROR) << "Detected " << gt_num << " images.";
       }
-      im_path = "/home/guojinma/Datasets/face/AFLW/data/data/flickr/" + im_name;
+      //im_path = "/home/guojinma/Datasets/face/AFLW/data/data/flickr/" + im_name;
+      im_path = "/home/guojinma/Datasets/face/FDDB/" + im_name;
       Mat im = imread(im_path.c_str());
       if (im.empty()) {
         cerr << "Test image is empty:" << im_path << endl;
@@ -497,14 +525,27 @@ int main(int argc, char **argv) {
       if(global_NMS != 0) {
           locations = p.global_NMS(locations_det, global_NMS);
       } else {
-          locations = locations_det; //p.global_NMS(locations_det, 0.8);
+          locations = locations_det; 
       }
       det_num += locations.size();
       bool Fir_flag5 = true;
       bool Fir_flag8 = true;
+
       for (size_t j = 0; j < locations.size(); ++j) {
-        Rect new_rect(locations[j].first[0], locations[j].first[1], locations[j].first[2], locations[j].first[3]);
-        float iou = calculate_overlap(locations[j].first, gt_rect);
+	vector<int> rect = locations[j].first;
+	rect[1] = rect[1] - int(0.2 * rect[3]);
+	rect[3] = rect[3] + int(0.4 * rect[3]);
+        Rect new_rect(rect[0], rect[1], rect[2], rect[3]);
+
+fprintf(fp, "%s\t", im_name.c_str());
+for(int k = 0; k < 4; ++k) {
+	fprintf(fp, "%d ",rect[k]);
+}
+fprintf(fp, "%f\n", locations[j].second);
+
+        float iou = calculate_overlap(rect, gt_rect);
+
+        char score_str[12];
         if(iou > 0.5) {
           acc_num5 += 1;
           if(Fir_flag5) {
@@ -513,26 +554,27 @@ int main(int argc, char **argv) {
           }
           //rectangle(im, new_rect, Scalar(0,0,255), 3);
         }
-        if(iou > 0.8) {
+        if(iou > 0.7) {
           acc_num8 += 1;
           if(Fir_flag8) {
             gt_a_num8 +=1;
             Fir_flag8 = false;
           }
         }
-        char score_str[12];
-        sprintf(score_str, "%.3f", locations[j].second);
-        putText(im, score_str, Point(locations[j].first[0], locations[j].first[1]), FONT_HERSHEY_SCRIPT_SIMPLEX, 0.7, Scalar(0, 0, 255), 2, 8);
-        rectangle(im, new_rect, Scalar(0,0,255), 3);
+        //sprintf(score_str, "%.3f", locations[j].second);
+        //putText(im, score_str, Point(locations[j].first[0], locations[j].first[1]), FONT_HERSHEY_SCRIPT_SIMPLEX, 0.7, Scalar(0, 0, 255), 2, 8);
+        rectangle(im, new_rect, Scalar(0,255, 0), 3);
       }
       im_path = "./test_results/" + im_name;
       imwrite(im_path.c_str(), im);
   }
 
-  LOG(INFO) << "0.5 Recall: " << float(gt_a_num5) / gt_num << "\t" << gt_a_num5 << "/" << gt_num;
-  LOG(INFO) << "0.5 Prection: " << float(acc_num5) / det_num << "\t" << acc_num5 << "/" << det_num;
+fclose(fp);
 
-  LOG(INFO) << "0.8 Recall: " << float(gt_a_num8) / gt_num << "\t" << gt_a_num8 << "/" << gt_num;
-  LOG(INFO) << "0.8 Prection: " << float(acc_num8) / det_num << "\t" << acc_num8 << "/" << det_num;
+  LOG(ERROR) << "0.5 Recall: " << float(gt_a_num5) / gt_num << "\t" << gt_a_num5 << "/" << gt_num;
+  LOG(ERROR) << "0.5 Prection: " << float(acc_num5) / det_num << "\t" << acc_num5 << "/" << det_num;
+
+  LOG(ERROR) << "0.7 Recall: " << float(gt_a_num8) / gt_num << "\t" << gt_a_num8 << "/" << gt_num;
+  LOG(ERROR) << "0.7 Prection: " << float(acc_num8) / det_num << "\t" << acc_num8 << "/" << det_num;
     return 0;
 }
